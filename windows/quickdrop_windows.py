@@ -13,6 +13,10 @@ import time
 import uuid
 import sys
 import winsound
+import io
+import math
+import struct
+import wave
 import winreg
 from ctypes import wintypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -68,6 +72,35 @@ def set_autostart(enabled):
 def notify(msg):
     print(msg, flush=True)
     status_callback(msg)
+
+def gentle_sent_sound():
+    """Short, quiet, two-tone WAV chime; played off the UI/server threads."""
+    try:
+        sample_rate = 22050
+        duration = 0.26
+        wav_bytes = io.BytesIO()
+        with wave.open(wav_bytes, 'wb') as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(sample_rate)
+            samples = bytearray()
+            for i in range(int(sample_rate * duration)):
+                t = i / sample_rate
+                # Rounded bell-like tones with a gentle attack and release.
+                frequency = 670.0 if t < 0.12 else 845.0
+                local = t if t < 0.12 else t - 0.12
+                segment_length = 0.12 if t < 0.12 else duration - 0.12
+                envelope = min(1.0, local / 0.015) * max(0.0, (segment_length - local) / 0.075)
+                value = 0.12 * envelope * (math.sin(2 * math.pi * frequency * t)
+                            + 0.17 * math.sin(2 * math.pi * frequency * 2 * t))
+                samples.extend(struct.pack('<h', int(max(-1, min(1, value)) * 32767)))
+            audio.writeframes(samples)
+        winsound.PlaySound(wav_bytes.getvalue(), winsound.SND_MEMORY | winsound.SND_NODEFAULT)
+    except (RuntimeError, OSError, ValueError):
+        pass
+
+def play_sent_sound():
+    threading.Thread(target=gentle_sent_sound, daemon=True).start()
 
 def local_ip():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -129,8 +162,7 @@ def queue_files(paths):
                 added += 1
     notify(f'{added} file pronti sul telefono' if added else 'Nessun file valido selezionato')
     if added:
-        try: winsound.MessageBeep(winsound.MB_OK)
-        except RuntimeError: pass
+        play_sent_sound()
 
 
 class Handler(BaseHTTPRequestHandler):
