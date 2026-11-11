@@ -55,8 +55,8 @@ def local_ip():
 def selected_explorer_paths():
     """Find selection in foreground Explorer, not unrelated Explorer windows."""
     hwnd = ctypes.windll.user32.GetForegroundWindow()
-    ps = r'''
-$target = [long]$args[0]
+    ps = f'''
+$target = [long]${hwnd}
 $shell = New-Object -ComObject Shell.Application
 foreach ($w in $shell.Windows()) {
   try {
@@ -73,7 +73,7 @@ foreach ($w in $shell.Windows()) {
     startup = subprocess.STARTUPINFO()
     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = 0
-    proc = subprocess.run(['powershell.exe', '-NoProfile', '-STA', '-EncodedCommand', encoded, str(hwnd)],
+    proc = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', encoded],
                           capture_output=True, text=True, errors='replace', timeout=8,
                           startupinfo=startup, creationflags=subprocess.CREATE_NO_WINDOW)
     if proc.returncode != 0:
