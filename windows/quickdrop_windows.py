@@ -11,24 +11,26 @@ import subprocess
 import threading
 import time
 import uuid
+import sys
+import winsound
+import winreg
 from ctypes import wintypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog, ttk
 
 APP = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'QuickDrop'
 APP.mkdir(parents=True, exist_ok=True)
 CONFIG_FILE = APP / 'settings.json'
-INBOX = APP / 'Ricevuti'
-INBOX.mkdir(exist_ok=True)
-
-DEFAULT = {'token': secrets.token_urlsafe(24), 'shortcut': 'CTRL+ALT+S', 'port': 8765}
+DEFAULT = {'token': secrets.token_urlsafe(24), 'shortcut': 'CTRL+ALT+S', 'port': 8765, 'inbox': str(Path.home() / 'Desktop' / 'QuickDrop Ricevuti')}
 try:
     config = {**DEFAULT, **json.loads(CONFIG_FILE.read_text('utf-8'))}
 except (ValueError, OSError):
     config = DEFAULT.copy()
+INBOX = Path(config['inbox']).expanduser()
+INBOX.mkdir(parents=True, exist_ok=True)
 
 def save():
     CONFIG_FILE.write_text(json.dumps(config, indent=2), encoding='utf-8')
@@ -38,6 +40,30 @@ pending = {}
 pending_lock = threading.Lock()
 ui_events = queue.Queue()
 status_callback = lambda msg: ui_events.put(('status', msg))
+
+def autostart_key():
+    return r'Software\Microsoft\Windows\CurrentVersion\Run'
+
+def autostart_enabled():
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, autostart_key()) as key:
+            winreg.QueryValueEx(key, 'QuickDrop')
+        return True
+    except OSError:
+        return False
+
+def set_autostart(enabled):
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, autostart_key(), 0, winreg.KEY_SET_VALUE) as key:
+        if enabled:
+            exe = Path(sys.executable)
+            if exe.name.lower() == 'python.exe' and exe.with_name('pythonw.exe').is_file():
+                exe = exe.with_name('pythonw.exe')
+            command = f'"{exe}" "{Path(__file__).resolve()}"'
+            winreg.SetValueEx(key, 'QuickDrop', 0, winreg.REG_SZ, command)
+        else:
+            try: winreg.DeleteValue(key, 'QuickDrop')
+            except FileNotFoundError: pass
+
 
 def notify(msg):
     print(msg, flush=True)
@@ -93,6 +119,9 @@ def queue_files(paths):
                 pending[item_id] = {'path': str(path), 'name': path.name, 'created': time.time()}
                 added += 1
     notify(f'{added} file pronti sul telefono' if added else 'Nessun file valido selezionato')
+    if added:
+        try: winsound.MessageBeep(winsound.MB_OK)
+        except RuntimeError: pass
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -188,6 +217,7 @@ class Handler(BaseHTTPRequestHandler):
                 target = INBOX / f'{stem}_{uuid.uuid4().hex[:6]}{ext}'
             tmp = INBOX / ('.upload_' + uuid.uuid4().hex)
             remaining = length
+            ui_events.put(('progress', (name, 0, length)))
             try:
                 with tmp.open('wb') as dst:
                     while remaining:
@@ -195,11 +225,13 @@ class Handler(BaseHTTPRequestHandler):
                         if not chunk: raise ConnectionError('upload interrupted')
                         dst.write(chunk)
                         remaining -= len(chunk)
+                        ui_events.put(('progress', (name, length - remaining, length)))
                 tmp.rename(target)
             finally:
                 tmp.unlink(missing_ok=True)
             notify('Ricevuto da Android: ' + target.name)
             ui_events.put(('received', target.name))
+            ui_events.put(('progress_done', target.name))
             self.reply(200, b'{}')
         except (OSError, ValueError, UnicodeError, ConnectionError):
             self.reply(400, b'{"error":"upload failed"}')
@@ -278,7 +310,7 @@ def main():
 
     root = tk.Tk()
     root.title('QuickDrop - Windows')
-    root.geometry('520x330')
+    root.geometry('560x465')
     root.resizable(False, False)
     tk.Label(root, text='QuickDrop', font=('Segoe UI', 22, 'bold')).pack(pady=(14, 4))
     tk.Label(root, text=f'Indirizzo PC: {local_ip()}:{config["port"]}', font=('Segoe UI', 12)).pack()
@@ -315,6 +347,14 @@ def main():
                     status.set(value)
                 elif kind == 'received':
                     show_received_popup(value)
+                elif kind == 'progress':
+                    name, done, total = value
+                    pct = min(100, int(100 * done / total)) if total else 100
+                    progress_value.set(pct)
+                    progress_text.set(f'Ricezione {name}: {pct}%')
+                elif kind == 'progress_done':
+                    progress_value.set(100)
+                    progress_text.set('Ricevuto: ' + value)
         except queue.Empty:
             pass
         root.after(100, poll_ui_events)
@@ -336,9 +376,36 @@ def main():
         status.set('Nuova scorciatoia: ' + new)
 
     tk.Button(root, text='Salva scorciatoia', command=update_hotkey).pack(pady=6)
+
+    tk.Label(root, text='Cartella file ricevuti:').pack()
+    folder_name = tk.StringVar(value=str(INBOX))
+    tk.Label(root, textvariable=folder_name, wraplength=510, fg='#345').pack()
+    def change_folder():
+        global INBOX
+        selected = filedialog.askdirectory(initialdir=str(INBOX), title='Seleziona la cartella QuickDrop')
+        if selected:
+            INBOX = Path(selected)
+            INBOX.mkdir(parents=True, exist_ok=True)
+            config['inbox'] = str(INBOX)
+            save()
+            folder_name.set(str(INBOX))
+    tk.Button(root, text='Cambia cartella', command=change_folder).pack(pady=3)
+    auto_flag = tk.BooleanVar(value=autostart_enabled())
+    def change_autostart():
+        try:
+            set_autostart(auto_flag.get())
+        except OSError as exc:
+            auto_flag.set(autostart_enabled())
+            messagebox.showerror('Avvio con Windows', str(exc))
+    tk.Checkbutton(root, text='Avvia automaticamente con Windows', variable=auto_flag, command=change_autostart).pack()
+    progress_value = tk.IntVar(value=0)
+    progress_text = tk.StringVar(value='Nessun trasferimento in corso')
+    ttk.Progressbar(root, variable=progress_value, length=430, maximum=100).pack(pady=(7, 2))
+    tk.Label(root, textvariable=progress_text, wraplength=500).pack()
+
     tk.Button(root, text='Apri cartella ricevuti', command=lambda: os.startfile(INBOX)).pack()
     tk.Label(root, textvariable=status, wraplength=490, fg='#185b83').pack(pady=16)
-    tk.Label(root, text='Trascina un file: comparira una piccola area QuickDrop. Wi-Fi fidata.', fg='#666').pack()
+    tk.Label(root, text='Puoi minimizzare la finestra, QuickDrop continua a funzionare.', fg='#666').pack()
     def on_close():
         if drop_helper is not None and drop_helper.poll() is None:
             drop_helper.terminate()
