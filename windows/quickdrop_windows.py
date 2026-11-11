@@ -208,8 +208,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header('Content-Length', str(size))
                 self.send_header('Cache-Control', 'no-store')
                 self.end_headers()
+                ui_events.put(('out_progress', (file.name, 0, size)))
+                sent = 0
                 with file.open('rb') as src:
-                    shutil.copyfileobj(src, self.wfile, 256 * 1024)
+                    while True:
+                        chunk = src.read(256 * 1024)
+                        if not chunk: break
+                        self.wfile.write(chunk)
+                        sent += len(chunk)
+                        ui_events.put(('out_progress', (file.name, sent, size)))
+                ui_events.put(('out_done', file.name))
             except (OSError, ConnectionError):
                 pass
         else:
@@ -400,6 +408,14 @@ def main():
                 elif kind == 'progress_done':
                     progress_value.set(100)
                     progress_text.set('Ricevuto: ' + value)
+                elif kind == 'out_progress':
+                    name, done, total = value
+                    pct = min(100, int(100 * done / total)) if total else 100
+                    progress_value.set(pct)
+                    progress_text.set(f'Invio al telefono {name}: {pct}%')
+                elif kind == 'out_done':
+                    progress_value.set(100)
+                    progress_text.set('Inviato al telefono: ' + value)
         except queue.Empty:
             pass
         root.after(100, poll_ui_events)
