@@ -14,12 +14,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ReceiverService extends Service {
     static final String CHANNEL = "quickdrop_receive";
+    static final String ARRIVED_CHANNEL = "quickdrop_arrived_v1";
     final AtomicBoolean running = new AtomicBoolean(false);
     Thread worker;
     @Override public void onCreate() {
         super.onCreate();
         NotificationChannel ch = new NotificationChannel(CHANNEL, "Ricezione QuickDrop", NotificationManager.IMPORTANCE_LOW);
-        getSystemService(NotificationManager.class).createNotificationChannel(ch);
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        manager.createNotificationChannel(ch);
+        NotificationChannel arrived = new NotificationChannel(ARRIVED_CHANNEL, "File ricevuti", NotificationManager.IMPORTANCE_DEFAULT);
+        arrived.setDescription("Avvisa con un breve suono e vibrazione quando arriva un file dal PC");
+        arrived.enableVibration(true);
+        arrived.setVibrationPattern(new long[]{0, 120, 90, 120});
+        manager.createNotificationChannel(arrived);
     }
     @Override public int onStartCommand(Intent i, int flags, int startId) {
         Notification notification = new Notification.Builder(this, CHANNEL)
@@ -44,14 +51,28 @@ public class ReceiverService extends Service {
                         JSONObject item = items.getJSONObject(j);
                         String id = item.getString("id");
                         if (!id.matches("[0-9a-f]{32}")) continue;
-                        download(id, item.getString("name"));
-                        Net.ack(this, id); // Acknowledge only after a successful download.
+                        String name = item.getString("name");
+                        download(id, name);
+                        Net.ack(this, id);
+                        alertReceived(name); // Acknowledge only after a successful download.
                     }
                 } catch (Exception ignored) { /* Retry when Wi-Fi or PC becomes available */ }
             }
             try { Thread.sleep(2500); } catch (InterruptedException e) { break; }
         }
     }
+    void alertReceived(String filename) {
+        Notification alert = new Notification.Builder(this, ARRIVED_CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle("QuickDrop - file ricevuto")
+            .setContentText(filename)
+            .setAutoCancel(true)
+            .setContentIntent(PendingIntent.getActivity(this, 0,
+                new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE))
+            .build();
+        getSystemService(NotificationManager.class).notify((int)(System.currentTimeMillis() & 0x7fffffff), alert);
+    }
+
     void download(String id, String originalName) throws Exception {
         HttpURLConnection c = Net.connect(this, "/download/" + id, "GET");
         Uri dest = null;
