@@ -2,6 +2,7 @@
 import base64
 import ctypes
 import json
+import queue
 import os
 import secrets
 import shutil
@@ -35,7 +36,8 @@ save()
 
 pending = {}
 pending_lock = threading.Lock()
-status_callback = lambda msg: None
+ui_events = queue.Queue()
+status_callback = lambda msg: ui_events.put(('status', msg))
 
 def notify(msg):
     print(msg, flush=True)
@@ -147,6 +149,23 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.authorized(): return
         path = urlparse(self.path).path
+        if path == '/queue-local':
+            # Restrict the local quick-drop endpoint to this Windows computer.
+            if self.client_address[0] not in ('127.0.0.1', '::1'):
+                self.reply(403); return
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length < 65536:
+                    self.reply(400); return
+                data = json.loads(self.rfile.read(length).decode('utf-8'))
+                paths = data.get('paths', [])
+                if not isinstance(paths, list) or len(paths) > 100 or any(not isinstance(p, str) for p in paths):
+                    self.reply(400); return
+                queue_files([Path(p) for p in paths])
+                self.reply(200, b'{}')
+            except (ValueError, UnicodeError, OSError, TypeError):
+                self.reply(400)
+            return
         if path.startswith('/ack/'):
             with pending_lock:
                 pending.pop(path.rsplit('/', 1)[-1], None)
@@ -180,6 +199,7 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 tmp.unlink(missing_ok=True)
             notify('Ricevuto da Android: ' + target.name)
+            ui_events.put(('received', target.name))
             self.reply(200, b'{}')
         except (OSError, ValueError, UnicodeError, ConnectionError):
             self.reply(400, b'{"error":"upload failed"}')
@@ -242,6 +262,19 @@ def main():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     listener = ShortcutListener()
     listener.start()
+    # Drag-and-drop helper runs independently with an OLE-capable WinForms drop target.
+    drop_helper = None
+    helper_path = Path(__file__).with_name('quickdrop_dropzone.ps1')
+    if helper_path.is_file():
+        try:
+            child_env = os.environ.copy()
+            child_env['QUICKDROP_PORT'] = str(config['port'])
+            child_env['QUICKDROP_TOKEN'] = config['token']
+            drop_helper = subprocess.Popen(
+                ['powershell.exe', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', str(helper_path)],
+                env=child_env, creationflags=subprocess.CREATE_NO_WINDOW)
+        except OSError as exc:
+            notify('Area trascinamento non avviata: ' + str(exc))
 
     root = tk.Tk()
     root.title('QuickDrop - Windows')
@@ -259,10 +292,36 @@ def main():
     hotkey_entry.insert(0, config['shortcut'])
     hotkey_entry.pack()
     status = tk.StringVar(value='Pronto. Seleziona file in Esplora file e usa la scorciatoia.')
-    def ui_notify(msg):
-        root.after(0, lambda: status.set(msg))
+    def show_received_popup(filename):
+        popup = tk.Toplevel(root)
+        popup.overrideredirect(True)
+        popup.attributes('-topmost', True)
+        popup.configure(bg='#173a50')
+        w, h = 360, 100
+        x = root.winfo_screenwidth() - w - 30
+        y = root.winfo_screenheight() - h - 85
+        popup.geometry(f'{w}x{h}+{x}+{y}')
+        tk.Label(popup, text='QuickDrop - File ricevuto', font=('Segoe UI', 12, 'bold'),
+                 bg='#173a50', fg='white').pack(pady=(14, 3))
+        tk.Label(popup, text=filename, font=('Segoe UI', 10), bg='#173a50', fg='white',
+                 wraplength=320).pack()
+        popup.after(4300, popup.destroy)
+
+    def poll_ui_events():
+        try:
+            for _ in range(30):
+                kind, value = ui_events.get_nowait()
+                if kind == 'status':
+                    status.set(value)
+                elif kind == 'received':
+                    show_received_popup(value)
+        except queue.Empty:
+            pass
+        root.after(100, poll_ui_events)
+
     global status_callback
-    status_callback = ui_notify
+    status_callback = lambda msg: ui_events.put(('status', msg))
+    root.after(100, poll_ui_events)
 
     def update_hotkey():
         new = hotkey_entry.get().strip().upper().replace(' ', '')
@@ -279,8 +338,10 @@ def main():
     tk.Button(root, text='Salva scorciatoia', command=update_hotkey).pack(pady=6)
     tk.Button(root, text='Apri cartella ricevuti', command=lambda: os.startfile(INBOX)).pack()
     tk.Label(root, textvariable=status, wraplength=490, fg='#185b83').pack(pady=16)
-    tk.Label(root, text='Mantieni aperta questa finestra. Usa solo una rete Wi-Fi fidata.', fg='#666').pack()
+    tk.Label(root, text='Trascina un file: comparira una piccola area QuickDrop. Wi-Fi fidata.', fg='#666').pack()
     def on_close():
+        if drop_helper is not None and drop_helper.poll() is None:
+            drop_helper.terminate()
         listener.stop()
         server.shutdown()
         root.destroy()
