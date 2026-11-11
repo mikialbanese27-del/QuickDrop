@@ -1,0 +1,36 @@
+name: Crea APK QuickDrop
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scarica sorgenti
+        uses: actions/checkout@v4
+      - name: Configura Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Configura Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Configura Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Installa Android SDK 35
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Compila APK
+        working-directory: android
+        run: gradle --no-daemon :app:assembleDebug
+      - name: Pubblica APK scaricabile
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuickDrop-Android-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
