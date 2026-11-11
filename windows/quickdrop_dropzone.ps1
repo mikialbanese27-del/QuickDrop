@@ -14,39 +14,36 @@ $token = $env:QUICKDROP_TOKEN
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'QuickDrop'
-$form.Width = 310
-$form.Height = 115
+$png = Join-Path $PSScriptRoot 'popup.png'
+$form.Width = 500
+$form.Height = 250
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
 $work = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-$form.Left = [int]($work.Right - $form.Width - 30)
-$form.Top = [int]($work.Bottom - $form.Height - 90)
+$form.Left = [int]($work.Right - $form.Width - 24)
+$form.Top = [int]($work.Bottom - $form.Height - 24)
 $form.TopMost = $true
 $form.ShowInTaskbar = $false
 $form.AllowDrop = $true
-$form.BackColor = [System.Drawing.Color]::FromArgb(31, 32, 37)
-$form.Opacity = 0.94
-$form.Add_SizeChanged({
-  $shape = New-Object System.Drawing.Drawing2D.GraphicsPath
-  $r = 22; $d = 2 * $r
-  $rect = $form.ClientRectangle
-  $shape.AddArc(0, 0, $d, $d, 180, 90)
-  $shape.AddArc($rect.Width - $d, 0, $d, $d, 270, 90)
-  $shape.AddArc($rect.Width - $d, $rect.Height - $d, $d, $d, 0, 90)
-  $shape.AddArc(0, $rect.Height - $d, $d, $d, 90, 90)
-  $shape.CloseFigure()
-  $form.Region = New-Object System.Drawing.Region($shape)
-  $shape.Dispose()
-})
-
-$label = New-Object System.Windows.Forms.Label
-$label.Text = 'trascina qui per inviare al telefono.'
-$label.ForeColor = [System.Drawing.Color]::FromArgb(185, 185, 190)
-$label.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
-$label.Dock = [System.Windows.Forms.DockStyle]::Fill
-$label.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Regular)
-$label.AllowDrop = $true
-$form.Controls.Add($label)
+$form.BackColor = [System.Drawing.Color]::Magenta
+$form.TransparencyKey = [System.Drawing.Color]::Magenta
+$img = $null
+if (Test-Path $png) {
+  $img = [System.Drawing.Image]::FromFile($png)
+}
+$panel = New-Object System.Windows.Forms.PictureBox
+$panel.Dock = [System.Windows.Forms.DockStyle]::Fill
+$panel.AllowDrop = $true
+$panel.BackColor = [System.Drawing.Color]::Magenta
+$panel.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::StretchImage
+if ($null -ne $img) {
+  $panel.Image = $img
+} else {
+  $form.BackColor = [System.Drawing.Color]::FromArgb(35, 75, 91)
+  $form.TransparencyKey = [System.Drawing.Color]::Empty
+  $panel.BackColor = [System.Drawing.Color]::FromArgb(35, 75, 91)
+}
+$form.Controls.Add($panel)
 
 $dragEnter = {
  param($sender, $e)
@@ -80,8 +77,8 @@ $dragDrop = {
 }
 $form.add_DragEnter($dragEnter)
 $form.add_DragDrop($dragDrop)
-$label.add_DragEnter($dragEnter)
-$label.add_DragDrop($dragDrop)
+$panel.add_DragEnter($dragEnter)
+$panel.add_DragDrop($dragDrop)
 
 $script:pressed = $false
 $script:mouseStart = [System.Windows.Forms.Cursor]::Position
@@ -109,5 +106,6 @@ $timer.Add_Tick({
   }
 })
 $form.Add_Shown({$form.Hide()})
+$form.Add_FormClosed({if ($null -ne $img) {$img.Dispose()}})
 $timer.Start()
 [System.Windows.Forms.Application]::Run($form)
