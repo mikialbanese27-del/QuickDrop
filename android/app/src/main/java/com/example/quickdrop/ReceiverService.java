@@ -53,9 +53,14 @@ public class ReceiverService extends Service {
                         String id = item.getString("id");
                         if (!id.matches("[0-9a-f]{32}")) continue;
                         String name = item.getString("name");
-                        download(id, name);
-                        Net.ack(this, id);
-                        alertReceived(name); // Acknowledge only after a successful download.
+                        try {
+                            download(id, name);
+                            Net.ack(this, id);
+                            alertReceived(name);
+                        } catch (Exception ex) {
+                            transferNotice("QuickDrop - trasferimento fallito", name, 0, false);
+                            throw ex;
+                        } // Acknowledge only after a successful download.
                     }
                 } catch (Exception ignored) { /* Retry when Wi-Fi or PC becomes available */ }
             }
@@ -74,6 +79,14 @@ public class ReceiverService extends Service {
         getSystemService(NotificationManager.class).notify((int)(System.currentTimeMillis() & 0x7fffffff), alert);
     }
 
+    void transferNotice(String title, String detail, int pct, boolean active) {
+        Notification.Builder b = new Notification.Builder(this, CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle(title).setContentText(detail).setOnlyAlertOnce(true)
+            .setOngoing(active);
+        if (active) b.setProgress(100, pct, false);
+        getSystemService(NotificationManager.class).notify(101, b.build());
+    }
     void download(String id, String originalName) throws Exception {
         HttpURLConnection c = Net.connect(this, "/download/" + id, "GET");
         Uri dest = null;
@@ -88,14 +101,29 @@ public class ReceiverService extends Service {
             values.put(MediaStore.Downloads.IS_PENDING, 1);
             dest = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
             if (dest == null) throw new IOException("Impossibile creare file nel telefono");
+            long total = c.getContentLengthLong();
+            long received = 0;
+            int previous = -1;
+            long lastNotify = 0;
+            transferNotice("QuickDrop - ricezione in corso", safeName, 0, true);
             try (InputStream in = c.getInputStream(); OutputStream out = getContentResolver().openOutputStream(dest)) {
                 if (out == null) throw new IOException("Impossibile scrivere file");
                 byte[] buf = new byte[256 * 1024];
                 int n;
-                while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+                while ((n = in.read(buf)) != -1) {
+                    out.write(buf, 0, n);
+                    received += n;
+                    int pct = total > 0 ? (int)Math.min(100, received * 100 / total) : 0;
+                    long now = System.currentTimeMillis();
+                    if (pct != previous && (now - lastNotify >= 500 || pct == 100)) {
+                        transferNotice("QuickDrop - ricezione in corso", safeName + " - " + pct + "%", pct, true);
+                        lastNotify = now; previous = pct;
+                    }
+                }
             }
             values.clear(); values.put(MediaStore.Downloads.IS_PENDING, 0);
             getContentResolver().update(dest, values, null, null);
+            transferNotice("QuickDrop - completato", safeName, 100, false);
         } catch (Exception e) {
             if (dest != null) getContentResolver().delete(dest, null, null);
             throw e;
