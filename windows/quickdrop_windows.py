@@ -113,9 +113,8 @@ def local_ip():
         sock.close()
 
 
-def selected_explorer_paths():
-    """Find selection in foreground Explorer, not unrelated Explorer windows."""
-    hwnd = ctypes.windll.user32.GetForegroundWindow()
+def selected_explorer_paths(hwnd):
+    """Find selection in Explorer window active at the moment of the shortcut."""
     ps = r'''
 $target = [long]__HWND__
 Add-Type -TypeDefinition @'
@@ -318,14 +317,19 @@ class ShortcutListener:
                 if msg.message == WM_HOTKEY:
                     # HWND changes when the shortcut fires in certain Explorer configurations;
                     # get selection promptly on a worker so the event loop stays responsive.
-                    threading.Thread(target=self.send_selection, daemon=True).start()
+                    hwnd = ctypes.windll.user32.GetForegroundWindow()
+                    threading.Thread(target=self.send_selection, args=(hwnd,), daemon=True).start()
         finally:
             ctypes.windll.user32.UnregisterHotKey(None, 1)
 
     @staticmethod
-    def send_selection():
+    def send_selection(hwnd):
         try:
-            queue_files(selected_explorer_paths())
+            paths = selected_explorer_paths(hwnd)
+            if not paths:
+                notify('Nessun file selezionato in Esplora file: apri una cartella e seleziona un file')
+                return
+            queue_files(paths)
         except Exception as exc:
             notify('Errore selezione: ' + str(exc))
 
