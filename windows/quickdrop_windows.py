@@ -55,8 +55,8 @@ def local_ip():
 def selected_explorer_paths():
     """Find selection in foreground Explorer, not unrelated Explorer windows."""
     hwnd = ctypes.windll.user32.GetForegroundWindow()
-    ps = f'''
-$target = [long]${hwnd}
+    ps = r'''
+$target = [long]__HWND__
 $shell = New-Object -ComObject Shell.Application
 foreach ($w in $shell.Windows()) {
   try {
@@ -69,6 +69,7 @@ foreach ($w in $shell.Windows()) {
   } catch { }
 }
 '''
+    ps = ps.replace('__HWND__', str(hwnd))
     encoded = base64.b64encode(ps.encode('utf-16le')).decode('ascii')
     startup = subprocess.STARTUPINFO()
     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
