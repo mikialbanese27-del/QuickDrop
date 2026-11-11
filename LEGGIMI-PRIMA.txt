@@ -1,0 +1,25 @@
+QUICKDROP — GENERA L'APK ONLINE SENZA ANDROID STUDIO
+
+1) Apri https://github.com/new e crea un repository PRIVATO chiamato QuickDrop.
+   Non spuntare 'Add a README file'.
+2) Apri il repository -> 'uploading an existing file' (oppure Add file -> Upload files).
+3) Estrai questo ZIP sul tuo PC. Trascina su GitHub il contenuto della cartella
+   QuickDrop-APK-Build, INCLUSA la cartella nascosta .github (contiene il workflow).
+   Se Windows non la mostra, attiva Visualizza -> Mostra -> Elementi nascosti.
+   Il sito GitHub potrebbe non accettare cartelle tramite alcuni browser;
+   in tal caso carica i file con GitHub Desktop, mantenendo le directory.
+4) Clicca 'Commit changes'.
+5) Nel repository apri Actions -> Crea APK QuickDrop -> Run workflow.
+   (Il push su main puo' anche avviare la compilazione automaticamente.)
+6) Apri la run terminata con successo, sezione Artifacts -> QuickDrop-Android-APK.
+7) Scarica lo ZIP dell'artefatto; dentro trovi app-debug.apk.
+8) Sul telefono apri il file APK e autorizza l'installazione da questa fonte,
+   se Android lo richiede. La compilazione online e' una build DEBUG.
+
+Non caricare file personali, chiavi o password nel repository.
+Il progetto non e' ancora stato compilato e provato sui tuoi dispositivi.
+In particolare, la ricezione continua su Android puo' essere sospesa dal sistema.
+
+WINDOWS: avvia windows/quickdrop_windows.py (richiede Python 3.10+).
+ANDROID: apri QuickDrop, inserisci IP:8765 e codice mostrati sul PC.
+Usa solo Wi-Fi privato e fidato: il trasferimento dell'MVP non e' cifrato.
