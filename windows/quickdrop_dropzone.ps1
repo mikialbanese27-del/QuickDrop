@@ -105,7 +105,13 @@ $timer.Add_Tick({
     if ($form.Visible) { $form.Hide() }
   }
 })
-$form.Add_Shown({$form.Hide()})
+$script:hasShownOnce = $false
+$form.Add_Shown({
+  if (-not $script:hasShownOnce) {
+    $script:hasShownOnce = $true
+    $form.Hide()
+  }
+})
 $form.Add_FormClosed({if ($null -ne $img) {$img.Dispose()}})
 $timer.Start()
 [System.Windows.Forms.Application]::Run($form)
