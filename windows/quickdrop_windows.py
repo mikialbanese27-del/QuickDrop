@@ -85,10 +85,19 @@ def selected_explorer_paths():
     hwnd = ctypes.windll.user32.GetForegroundWindow()
     ps = r'''
 $target = [long]__HWND__
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class QDWin {
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+}
+'@
+$root = [QDWin]::GetAncestor([IntPtr]$target, 2).ToInt64()
 $shell = New-Object -ComObject Shell.Application
 foreach ($w in $shell.Windows()) {
   try {
-    if ([long]$w.HWND -eq $target -and $w.Document) {
+    $window = [long]$w.HWND
+    if (($window -eq $target -or $window -eq $root) -and $w.Document) {
       foreach ($x in $w.Document.SelectedItems()) {
         if ($x.Path) { Write-Output $x.Path }
       }
