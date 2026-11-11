@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ReceiverService extends Service {
     static final String CHANNEL = "quickdrop_receive";
-    static final String ARRIVED_CHANNEL = "quickdrop_arrived_v1";
+    static final String ARRIVED_CHANNEL = "quickdrop_arrived_v2_vibrate_only";
     final AtomicBoolean running = new AtomicBoolean(false);
     Thread worker;
     @Override public void onCreate() {
@@ -23,9 +23,10 @@ public class ReceiverService extends Service {
         NotificationManager manager = getSystemService(NotificationManager.class);
         manager.createNotificationChannel(ch);
         NotificationChannel arrived = new NotificationChannel(ARRIVED_CHANNEL, "File ricevuti", NotificationManager.IMPORTANCE_DEFAULT);
-        arrived.setDescription("Avvisa con un breve suono e vibrazione quando arriva un file dal PC");
+        arrived.setDescription("Una breve vibrazione senza suoneria quando arriva un file dal PC");
+        arrived.setSound(null, null);
         arrived.enableVibration(true);
-        arrived.setVibrationPattern(new long[]{0, 120, 90, 120});
+        arrived.setVibrationPattern(new long[]{0, 90});
         manager.createNotificationChannel(arrived);
     }
     @Override public int onStartCommand(Intent i, int flags, int startId) {
